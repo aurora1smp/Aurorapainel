@@ -187,7 +187,7 @@ tfoot td{font-weight:900;background:var(--blue-soft);color:var(--blue2)}
       <div class="filtros" style="grid-template-columns:minmax(160px,260px)">
         <select id="cMes" aria-label="Mês"></select>
       </div>
-      <div class="mut sm" style="margin-bottom:8px">A comissão é a porcentagem do código sobre o valor do pedido e só conta depois que o pagamento é confirmado. Clique em um código para ver os pedidos.</div>
+      <div class="mut sm" style="margin-bottom:8px">A comissão é de 40% do valor do pedido que usou o código e só conta depois que o pagamento é confirmado. Clique em um código para ver os pedidos.</div>
       <div class="tw"><table id="cTab"></table></div>
     </section>
   </main>
@@ -209,6 +209,7 @@ const firebaseConfig = {
 };
 const fapp = initializeApp(firebaseConfig), db = getFirestore(fapp), auth = getAuth(fapp);
 
+const COMISSAO_PCT = 40; // comissão fixa: 40% do valor do pedido
 const PAGOS = ["Pagamento efetuado", "Em produção", "Finalizado"];
 const ST_CLASSE = {"Aguardando pagamento":"st-a","Pagamento efetuado":"st-p","Em produção":"st-e","Finalizado":"st-f","Cancelado":"st-c"};
 const STATUS = Object.keys(ST_CLASSE);
@@ -331,7 +332,7 @@ function prep(){
     const c = mapa[p.cod];
     p.codOk = !!c;
     p.com = 0;
-    if (p.pago && p.cod) p.com = (p.comissao != null && p.comissao !== "") ? numero(p.comissao) : (c ? Math.round(p.v * c.pct) / 100 : 0);
+    if (p.pago && p.cod) p.com = Math.round(p.v * COMISSAO_PCT) / 100;
   });
   S.pedidos.sort((a, b) => (b.ts - a.ts) || (b.linha - a.linha));
 }
@@ -430,6 +431,8 @@ async function acao(chave, a){
   try {
     const campos = {status:corpo.status};
     if (corpo.status === "Pagamento efetuado" && !p.pagamentoEm) campos.pagamentoEm = agora();
+    if (a === "pagar" && p.cod) campos.comissao = Math.round(p.v * COMISSAO_PCT) / 100;
+    if (corpo.status === "Cancelado") campos.comissao = 0;
     if (corpo.status === "Finalizado") campos.finalizadoEm = agora();
     else if (a === "reabrir") campos.finalizadoEm = "";
     if (corpo.assumir) campos.responsavel = S.nome;
@@ -507,7 +510,7 @@ function renderCom(){
   $("#cTab").innerHTML = `<thead><tr><th>Código</th><th>Parceiro</th><th class="r">%</th><th class="r">Pedidos pagos</th><th class="r">Aguardando</th><th class="r">Vendas</th><th class="r">Comissão</th></tr></thead><tbody>${avisoSemCod}` +
     (lista.length ? lista.map(l => {
       const aberto = S.abaCom === l.cod;
-      let h = `<tr class="clk" data-cod="${esc(l.cod)}"><td><b>${esc(l.cod)}</b></td><td>${l.ok ? esc(l.nome) + (l.tel ? '<div class="mut sm">' + esc(l.tel) + "</div>" : "") : '<span class="mut">não cadastrado</span>'}</td><td class="r">${l.ok ? l.pct.toLocaleString("pt-BR") + "%" : "—"}</td><td class="r">${l.n}</td><td class="r">${l.pend}</td><td class="r">${brl(l.vendas)}</td><td class="r"><b>${brl(l.com)}</b></td></tr>`;
+      let h = `<tr class="clk" data-cod="${esc(l.cod)}"><td><b>${esc(l.cod)}</b></td><td>${l.ok ? esc(l.nome) + (l.tel ? '<div class="mut sm">' + esc(l.tel) + "</div>" : "") : '<span class="mut">não cadastrado</span>'}</td><td class="r">${COMISSAO_PCT}%</td><td class="r">${l.n}</td><td class="r">${l.pend}</td><td class="r">${brl(l.vendas)}</td><td class="r"><b>${brl(l.com)}</b></td></tr>`;
       if (aberto) h += l.peds.length ? l.peds.map(p => `<tr class="sub"><td>${esc(p.pedido)}</td><td>${esc(p.nome)}</td><td class="r">${esc(mesRot(p.mes))}</td><td colspan="2"><span class="bd ${ST_CLASSE[p.st]}">${esc(p.st)}</span></td><td class="r">${brl(p.v)}</td><td class="r">${p.pago ? brl(p.com) : "—"}</td></tr>`).join("") : '<tr class="sub"><td colspan="7" class="mut">Nenhum pedido com este código no período.</td></tr>';
       return h;
     }).join("") : '<tr><td colspan="7" class="mut">Nenhum código cadastrado na coleção parceiros.</td></tr>') +
