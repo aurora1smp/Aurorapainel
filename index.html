@@ -187,7 +187,7 @@ tfoot td{font-weight:900;background:var(--blue-soft);color:var(--blue2)}
       <div class="filtros" style="grid-template-columns:minmax(160px,260px)">
         <select id="cMes" aria-label="Mês"></select>
       </div>
-      <div class="mut sm" style="margin-bottom:8px">A comissão é de 40% do valor do pedido que usou o código e só conta depois que o pagamento é confirmado. Clique em um código para ver os pedidos.</div>
+      <div class="mut sm" style="margin-bottom:8px">A comissão é de 40% do valor líquido do plano (Básico R$ 10, Pro R$ 20, Avançado R$ 30, Premium R$ 45) e só conta depois que o pagamento é confirmado. Clique em um código para ver os pedidos.</div>
       <div class="tw"><table id="cTab"></table></div>
     </section>
   </main>
@@ -209,7 +209,17 @@ const firebaseConfig = {
 };
 const fapp = initializeApp(firebaseConfig), db = getFirestore(fapp), auth = getAuth(fapp);
 
-const COMISSAO_PCT = 40; // comissão fixa: 40% do valor do pedido
+const COMISSAO_PCT = 40; // comissão: 40% do valor líquido do plano (o que realmente fica para a equipe)
+const LIQUIDO_PLANO = {basico:10, pro:20, avancado:30, premium:45};
+function liquidoDe(plano, bruto){
+  const s = String(plano || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  const k = s.includes("premium") ? "premium" : s.includes("avanc") ? "avancado" : s.includes("basic") ? "basico" : /\bpro\b|profission/.test(s) ? "pro" : "";
+  return k ? {v:LIQUIDO_PLANO[k], ok:true} : {v:bruto, ok:false};
+}
+function comissaoDe(plano, bruto){
+  const l = liquidoDe(plano, bruto);
+  return {com:Math.round(l.v * COMISSAO_PCT) / 100, ok:l.ok};
+}
 const PAGOS = ["Pagamento efetuado", "Em produção", "Finalizado"];
 const ST_CLASSE = {"Aguardando pagamento":"st-a","Pagamento efetuado":"st-p","Em produção":"st-e","Finalizado":"st-f","Cancelado":"st-c"};
 const STATUS = Object.keys(ST_CLASSE);
@@ -332,7 +342,8 @@ function prep(){
     const c = mapa[p.cod];
     p.codOk = !!c;
     p.com = 0;
-    if (p.pago && p.cod) p.com = Math.round(p.v * COMISSAO_PCT) / 100;
+    p.planoOk = true;
+    if (p.pago && p.cod) { const r = comissaoDe(p.plano, p.v); p.com = r.com; p.planoOk = r.ok; }
   });
   S.pedidos.sort((a, b) => (b.ts - a.ts) || (b.linha - a.linha));
 }
@@ -394,7 +405,7 @@ function botoes(p){
 function cardPedido(p){
   const k = p.produto + "|" + p.pedido, aberto = S.abertos.has(k);
   const det = p.detalhes.concat([["Pagamento em", p.pagamentoEm || "—"], ["Finalizado em", p.finalizadoEm || "—"]]);
-  const com = p.cod ? (p.pago ? brl(p.com) : "a definir no pagamento") : "sem código";
+  const com = p.cod ? (p.pago ? brl(p.com) + (p.planoOk ? "" : " (plano não reconhecido: 40% do valor do pedido)") : "a definir no pagamento") : "sem código";
   return `<article class="ped">
     <button type="button" class="ph" data-t="${esc(k)}" aria-expanded="${aberto}">
       <span class="id">${esc(p.pedido)}</span>
@@ -431,7 +442,7 @@ async function acao(chave, a){
   try {
     const campos = {status:corpo.status};
     if (corpo.status === "Pagamento efetuado" && !p.pagamentoEm) campos.pagamentoEm = agora();
-    if (a === "pagar" && p.cod) campos.comissao = Math.round(p.v * COMISSAO_PCT) / 100;
+    if (a === "pagar" && p.cod) campos.comissao = comissaoDe(p.plano, p.v).com;
     if (corpo.status === "Cancelado") campos.comissao = 0;
     if (corpo.status === "Finalizado") campos.finalizadoEm = agora();
     else if (a === "reabrir") campos.finalizadoEm = "";
